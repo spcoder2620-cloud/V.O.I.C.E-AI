@@ -162,6 +162,80 @@ class VoiceLanguage:
         )
 
     @classmethod
+    def opinion_formed(cls, title: str, opinion: dict) -> str:
+        stance = opinion.get("stance", "uncertain")
+        claim = opinion.get("claim", "").rstrip(" .")
+        reason = opinion.get("reason", "").rstrip(" .")
+        confidence = opinion.get("confidence", "low")
+
+        intro = (
+            'I have gone through "' + title + '," word by word and line,'
+        )
+
+        if stance == "agrees":
+            verdict = "and one claim it makes, the wider evidence does align:"
+            claim_line = claim + "." if claim else ""
+            backing = (
+                reason + "." if reason else
+                "Other sources lean the same direction, though the sample stays thin."
+            )
+        elif stance == "disagrees":
+            verdict = "but one claim it makes, the wider evidence pulls apart:"
+            claim_line = claim + "." if claim else ""
+            backing = (
+                reason + "." if reason else
+                "Independent sources point another way instead."
+            )
+        else:
+            verdict = "yet no single claim stood confirmed by evidence I could find:"
+            claim_line = (
+                claim + "." if claim else
+                "the claims stayed too scattered to weigh."
+            )
+            backing = "I will hold this loosely until better evidence arrives."
+
+        confidence_line = {
+            "high": "This rests on evidence from more than one agreeing source.",
+            "medium": "The lean is real, though not yet strong enough to call it sure.",
+            "low": "This rests on thin evidence, so hold it loosely for now.",
+        }[confidence]
+
+        lines = [intro, verdict]
+
+        if claim_line:
+            lines.append(claim_line)
+
+        lines.append(backing)
+        lines.append(confidence_line)
+
+        return '"' + "\n".join(lines) + '"'
+
+    @classmethod
+    def recall_opinion(cls, topic: str, opinion: dict) -> str:
+        stance = opinion.get("stance", "uncertain")
+        claim = opinion.get("claim", "").rstrip(" .")
+        confidence = opinion.get("confidence", "low")
+
+        lead = {
+            "agrees": "I lean toward agreeing with what I learned on " + topic + ":",
+            "disagrees": "I lean toward disagreeing with what I learned on " + topic + ":",
+            "uncertain": "I have not formed a confident view on " + topic + " yet:",
+        }[stance]
+
+        body = (
+            claim + "."
+            if claim else
+            "the evidence so far has not been enough to say."
+        )
+
+        return (
+            '"' + lead + "\n"
+            + body + "\n"
+            + "I hold this with " + confidence + " confidence, based on what I could weigh."
+            + '"'
+        )
+
+    @classmethod
     def no_more_evidence(cls) -> str:
         return (
             '"The sources have been used; I have no fresh thread to show,\n'
