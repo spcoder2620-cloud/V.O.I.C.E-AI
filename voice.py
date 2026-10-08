@@ -14,30 +14,31 @@ This is the current text brain:
     language.py -> personality and rhyme
 """
 
+import html
 import json
 import random
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import Counter
 from pathlib import Path
 
 from language import VoiceLanguage
 from smart import SmartEngine
-from web import Web, Text
-from youtube import YouTube
-from opinion import OpinionEngine
 
 
 MEMORY_FILE = Path("voice_memory.json")
 
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "Version/26.0 Safari/605.1.15"
+)
+
 FOLLOWUP_RE = re.compile(
     r"^(tell me more|go on|keep going|continue|what else|"
     r"and then|more)\b",
-    re.I
-)
-
-OPINION_TRIGGER_RE = re.compile(
-    r"\b(think|opinion|agree|disagree|right|wrong|correct|incorrect|"
-    r"true|false|stance|believe)\b",
     re.I
 )
 
@@ -47,8 +48,7 @@ class Memory:
         self.data = {
             "facts": {},
             "conversations": [],
-            "learned_topics": {},
-            "opinions": {}
+            "learned_topics": {}
         }
         self.load()
 
@@ -148,6 +148,307 @@ class Memory:
         )
 
         self.save()
+
+
+class Text:
+    STOPWORDS = SmartEngine.STOP
+
+    @staticmethod
+    def words(text):
+        return re.findall(
+            r"[A-Za-z0-9']+",
+            text.lower()
+        )
+
+    @classmethod
+    def keywords(cls, text):
+        return Counter(
+            word
+            for word in cls.words(text)
+            if (
+                word not in cls.STOPWORDS
+                and len(word) >= 3
+            )
+        )
+
+    @staticmethod
+    def sentences(text):
+        # Keep newline and punctuation boundaries. This avoids turning an
+        # entire webpage into one giant sentence.
+        chunks = re.split(
+            r"(?:\n+|(?<=[.!?])\s+)",
+            text
+        )
+        return [
+            re.sub(
+                r"\s+",
+                " ",
+                chunk
+            ).strip()
+            for chunk in chunks
+            if chunk.strip()
+        ]
+
+    @staticmethod
+    def clean(text):
+        return re.sub(
+            r"\s+",
+            " ",
+            text
+        ).strip()
+
+
+class Web:
+    def request(self, url):
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
+            )
+
+            with urllib.request.urlopen(
+                request,
+                timeout=12
+            ) as response:
+                return response.read().decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            OSError
+        ):
+            return ""
+
+    def search(self, query, amount=6):
+        encoded = urllib.parse.quote_plus(
+            query
+        )
+
+        url = (
+            "https://html.duckduckgo.com/html/?q="
+            + encoded
+        )
+
+        page = self.request(url)
+
+        if not page:
+            return []
+
+        # Capture both result links and result snippets.
+        result_pattern = re.compile(
+            r'<a[^>]+class="result__a"'
+            r'[^>]+href="([^"]+)"'
+            r'[^>]*>(.*?)</a>'
+            r'(.*?)(?:'
+            r'<a[^>]+class="result__url"'
+            r'|</div>\s*</div>)',
+            flags=re.I | re.S
+        )
+
+        results = []
+        seen = set()
+
+        for match in result_pattern.finditer(page):
+            raw_url = match.group(1)
+            raw_title = match.group(2)
+            tail = match.group(3)
+
+            title = re.sub(
+                r"<[^>]+>",
+                "",
+                raw_title
+            )
+
+            title = Text.clean(
+                html.unescape(title)
+            )
+
+            url = html.unescape(
+                raw_url
+            )
+
+            parsed = urllib.parse.urlparse(
+                url
+            )
+
+            params = urllib.parse.parse_qs(
+                parsed.query
+            )
+
+            if "uddg" in params:
+                url = params["uddg"][0]
+
+            if not url.startswith(
+                ("http://", "https://")
+            ):
+                continue
+
+            if url in seen:
+                continue
+
+            seen.add(url)
+
+            snippet_match = re.search(
+                r'<a[^>]+class="result__snippet"'
+                r'[^>]*>(.*?)</a>|'
+                r'<div[^>]+class="result__snippet"'
+                r'[^>]*>(.*?)</div>',
+                tail,
+                flags=re.I | re.S
+            )
+
+            snippet = ""
+
+            if snippet_match:
+                snippet = (
+                    snippet_match.group(1)
+                    or snippet_match.group(2)
+                    or ""
+                )
+
+                snippet = Text.clean(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            "",
+                            snippet
+                        )
+                    )
+                )
+
+            results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet
+            })
+
+            if len(results) >= amount:
+                break
+
+        # If DDG changes its HTML around the combined regex, fall back to
+        # the simpler link parser so search does not completely fail.
+        if not results:
+            pattern = (
+                r'<a[^>]+class="result__a"'
+                r'[^>]+href="([^"]+)"'
+                r'[^>]*>(.*?)</a>'
+            )
+
+            for raw_url, raw_title in re.findall(
+                pattern,
+                page,
+                flags=re.I | re.S
+            ):
+                title = Text.clean(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            "",
+                            raw_title
+                        )
+                    )
+                )
+
+                url = html.unescape(
+                    raw_url
+                )
+
+                parsed = urllib.parse.urlparse(
+                    url
+                )
+
+                params = urllib.parse.parse_qs(
+                    parsed.query
+                )
+
+                if "uddg" in params:
+                    url = params["uddg"][0]
+
+                if not url.startswith(
+                    ("http://", "https://")
+                ):
+                    continue
+
+                if url in seen:
+                    continue
+
+                seen.add(url)
+
+                results.append({
+                    "title": title,
+                    "url": url,
+                    "snippet": ""
+                })
+
+                if len(results) >= amount:
+                    break
+
+        return results
+
+    def read(self, url):
+        page = self.request(url)
+
+        if not page:
+            return ""
+
+        for pattern in (
+            r"<script.*?</script>",
+            r"<style.*?</style>",
+            r"<svg.*?</svg>",
+            r"<!--.*?-->"
+        ):
+            page = re.sub(
+                pattern,
+                " ",
+                page,
+                flags=re.I | re.S
+            )
+
+        # Preserve block boundaries so the brain can recover real sentences.
+        page = re.sub(
+            r"</?(p|div|br|li|h[1-6]|article|section|main|header|footer|blockquote)[^>]*>",
+            "\n",
+            page,
+            flags=re.I
+        )
+
+        page = re.sub(
+            r"<[^>]+>",
+            " ",
+            page
+        )
+
+        page = html.unescape(
+            page
+        )
+
+        return re.sub(
+            r"[ \t]+",
+            " ",
+            page
+        ).strip()
+
+    @staticmethod
+    def domain(url):
+        try:
+            domain = urllib.parse.urlparse(
+                url
+            ).netloc.lower()
+
+            if domain.startswith("www."):
+                domain = domain[4:]
+
+            return domain or "unknown"
+
+        except Exception:
+            return "unknown"
 
 
 class Question:
@@ -656,35 +957,15 @@ class Voice:
         self.research = Research(
             self.memory
         )
-        self.youtube = YouTube()
 
         self.last_facts = []
         self.last_question = ""
         self.used_sentences = []
 
     def respond(self, message):
-        # A YouTube link anywhere in the message takes priority: go learn
-        # the video (title, transcript, an evidence-checked opinion)
-        # instead of treating the link as a normal question.
-        link = self.youtube.find_link(
-            message
-        )
-
-        if link:
-            return self.learn_from_youtube(
-                link
-            )
-
         self.learner.learn(
             message
         )
-
-        opinion_reply = self.opinion_question(
-            message
-        )
-
-        if opinion_reply:
-            return opinion_reply
 
         # Follow-up questions reuse the previous research pass first.
         if (
@@ -836,163 +1117,6 @@ class Voice:
                 )
 
         return None
-
-    def opinion_question(self, message):
-        """If the person seems to be asking what V.O.I.C.E. thinks about
-        something it has already formed an opinion on, answer from that
-        instead of silently ignoring stored opinions."""
-        opinions = self.memory.data.get(
-            "opinions",
-            {}
-        )
-
-        if not opinions:
-            return None
-
-        if not OPINION_TRIGGER_RE.search(message):
-            return None
-
-        words = set(
-            Text.keywords(message)
-        )
-
-        best_topic = None
-        best_overlap = 0
-
-        for topic in opinions:
-            overlap = len(
-                words & set(Text.keywords(topic))
-            )
-
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_topic = topic
-
-        if best_topic and best_overlap >= 1:
-            return VoiceLanguage.recall_opinion(
-                best_topic,
-                opinions[best_topic]
-            )
-
-        return None
-
-    def learn_from_youtube(self, url):
-        print()
-        print(
-            "> found a YouTube link; fetching the video..."
-        )
-
-        title, transcript = self.youtube.fetch(
-            url
-        )
-
-        if not title:
-            return (
-                '"That link did not lead me to a video I could reach,\n'
-                'check the address, and I will try again to teach."'
-            )
-
-        if not transcript:
-            return (
-                '"I found the video titled ' + title + ',\n'
-                'but no captions were there for me to read and weigh —\n'
-                'without a transcript I have no text to learn today."'
-            )
-
-        print(
-            "> reading the transcript..."
-        )
-
-        topic = SmartEngine.topic(
-            title
-        )
-
-        keywords = set(
-            Text.keywords(title)
-        )
-
-        facts = []
-
-        for sentence in Text.sentences(
-            transcript
-        ):
-            sentence = SmartEngine.clean_evidence(
-                sentence
-            )
-
-            if not 45 <= len(sentence) <= 520:
-                continue
-
-            overlap = len(
-                set(Text.words(sentence)) & keywords
-            )
-
-            facts.append({
-                "sentence": sentence,
-                "source": "youtube.com",
-                "title": title,
-                "url": url,
-                "score": 1.0 + overlap * 1.5
-            })
-
-        if not facts:
-            return (
-                '"I read "' + title + '" from end to end,\n'
-                'but found no steady claims that evidence could defend."'
-            )
-
-        facts = self.research.compare(
-            facts
-        )
-
-        print(
-            "> learning what the video says..."
-        )
-
-        for fact in facts[:25]:
-            self.memory.learn_topic(
-                topic,
-                {
-                    "sentence": fact["sentence"],
-                    "source": fact["source"],
-                    "title": fact["title"],
-                    "url": fact["url"]
-                }
-            )
-
-        print(
-            "> checking its claims against independent sources..."
-        )
-
-        corroboration_facts = self.research.investigate(
-            title
-        )
-
-        corroboration = [
-            fact["sentence"] for fact in corroboration_facts
-        ]
-
-        claims = OpinionEngine.extract_claims(
-            transcript
-        )
-
-        opinion = OpinionEngine.form_opinion(
-            topic,
-            claims,
-            corroboration
-        )
-
-        self.memory.data.setdefault(
-            "opinions",
-            {}
-        )[topic] = opinion
-
-        self.memory.save()
-
-        return VoiceLanguage.opinion_formed(
-            title,
-            opinion
-        )
 
     def conversation(
         self,
