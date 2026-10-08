@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 """
 V.O.I.C.E. — TEXT-ONLY EDITION
+==============================
 
-No popup. No speech. No API key. No external Python packages.
+No popup.
+No speech.
+No external Python packages.
+No API key.
 
-voice.py owns conversation + memory + browsing.
-language.py owns personality + rhyme.
-smart.py owns evidence ranking + answer synthesis.
+This is the current text brain:
+    voice.py  -> conversation, memory, browsing
+    smart.py  -> evidence ranking and answer synthesis
+    language.py -> personality and rhyme
 """
 
-import re
+import html
 import json
 import random
-import html
+import re
+import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 from language import VoiceLanguage
 from smart import SmartEngine
@@ -31,7 +37,8 @@ USER_AGENT = (
 )
 
 FOLLOWUP_RE = re.compile(
-    r"^(tell me more|go on|keep going|continue|what else|and then|more)\b",
+    r"^(tell me more|go on|keep going|continue|what else|"
+    r"and then|more)\b",
     re.I
 )
 
@@ -48,40 +55,98 @@ class Memory:
     def load(self):
         if not MEMORY_FILE.exists():
             return
+
         try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+            with open(
+                MEMORY_FILE,
+                "r",
+                encoding="utf-8"
+            ) as f:
                 loaded = json.load(f)
+
             if isinstance(loaded, dict):
-                self.data.update(loaded)
-        except (OSError, json.JSONDecodeError):
-            print("> memory could not be loaded; using a fresh memory layer.")
+                self.data.update(
+                    loaded
+                )
+
+        except (
+            OSError,
+            json.JSONDecodeError
+        ):
+            print(
+                "> memory could not be loaded; "
+                "using a fresh memory layer."
+            )
 
     def save(self):
         try:
-            with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            with open(
+                MEMORY_FILE,
+                "w",
+                encoding="utf-8"
+            ) as f:
+                json.dump(
+                    self.data,
+                    f,
+                    indent=2,
+                    ensure_ascii=False
+                )
         except OSError:
             pass
 
     def remember(self, key, value):
-        self.data.setdefault("facts", {})[key] = value
+        self.data.setdefault(
+            "facts",
+            {}
+        )[key] = value
         self.save()
 
     def get(self, key):
-        return self.data.get("facts", {}).get(key)
+        return self.data.get(
+            "facts",
+            {}
+        ).get(key)
 
-    def add_conversation(self, user, response):
-        self.data.setdefault("conversations", []).append({
+    def add_conversation(
+        self,
+        user,
+        response
+    ):
+        self.data.setdefault(
+            "conversations",
+            []
+        ).append({
             "user": user,
             "response": response
         })
-        self.data["conversations"] = self.data["conversations"][-250:]
+
+        self.data["conversations"] = (
+            self.data["conversations"][-250:]
+        )
+
         self.save()
 
-    def learn_topic(self, topic, information):
-        topics = self.data.setdefault("learned_topics", {})
-        topics.setdefault(topic, []).append(information)
-        topics[topic] = topics[topic][-50:]
+    def learn_topic(
+        self,
+        topic,
+        information
+    ):
+        topics = self.data.setdefault(
+            "learned_topics",
+            {}
+        )
+
+        topics.setdefault(
+            topic,
+            []
+        ).append(
+            information
+        )
+
+        topics[topic] = (
+            topics[topic][-60:]
+        )
+
         self.save()
 
 
@@ -90,22 +155,47 @@ class Text:
 
     @staticmethod
     def words(text):
-        return re.findall(r"[A-Za-z0-9']+", text.lower())
+        return re.findall(
+            r"[A-Za-z0-9']+",
+            text.lower()
+        )
 
     @classmethod
     def keywords(cls, text):
         return Counter(
-            word for word in cls.words(text)
-            if word not in cls.STOPWORDS and len(word) >= 3
+            word
+            for word in cls.words(text)
+            if (
+                word not in cls.STOPWORDS
+                and len(word) >= 3
+            )
         )
 
     @staticmethod
     def sentences(text):
-        return re.split(r"(?<=[.!?])\s+", text.strip())
+        # Keep newline and punctuation boundaries. This avoids turning an
+        # entire webpage into one giant sentence.
+        chunks = re.split(
+            r"(?:\n+|(?<=[.!?])\s+)",
+            text
+        )
+        return [
+            re.sub(
+                r"\s+",
+                " ",
+                chunk
+            ).strip()
+            for chunk in chunks
+            if chunk.strip()
+        ]
 
     @staticmethod
     def clean(text):
-        return re.sub(r"\s+", " ", text).strip()
+        return re.sub(
+            r"\s+",
+            " ",
+            text
+        ).strip()
 
 
 class Web:
@@ -113,51 +203,198 @@ class Web:
         try:
             request = urllib.request.Request(
                 url,
-                headers={"User-Agent": USER_AGENT}
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
             )
-            with urllib.request.urlopen(request, timeout=12) as response:
-                return response.read().decode("utf-8", errors="ignore")
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+
+            with urllib.request.urlopen(
+                request,
+                timeout=12
+            ) as response:
+                return response.read().decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            OSError
+        ):
             return ""
 
     def search(self, query, amount=6):
-        encoded = urllib.parse.quote_plus(query)
-        url = "https://html.duckduckgo.com/html/?q=" + encoded
+        encoded = urllib.parse.quote_plus(
+            query
+        )
+
+        url = (
+            "https://html.duckduckgo.com/html/?q="
+            + encoded
+        )
+
         page = self.request(url)
+
         if not page:
             return []
 
-        pattern = (
+        # Capture both result links and result snippets.
+        result_pattern = re.compile(
             r'<a[^>]+class="result__a"'
             r'[^>]+href="([^"]+)"'
             r'[^>]*>(.*?)</a>'
+            r'(.*?)(?:'
+            r'<a[^>]+class="result__url"'
+            r'|</div>\s*</div>)',
+            flags=re.I | re.S
         )
-        matches = re.findall(pattern, page, flags=re.I | re.S)
+
         results = []
         seen = set()
 
-        for raw_url, raw_title in matches:
-            title = Text.clean(
-                html.unescape(re.sub(r"<[^>]+>", "", raw_title))
+        for match in result_pattern.finditer(page):
+            raw_url = match.group(1)
+            raw_title = match.group(2)
+            tail = match.group(3)
+
+            title = re.sub(
+                r"<[^>]+>",
+                "",
+                raw_title
             )
-            url = html.unescape(raw_url)
-            parsed = urllib.parse.urlparse(url)
-            params = urllib.parse.parse_qs(parsed.query)
+
+            title = Text.clean(
+                html.unescape(title)
+            )
+
+            url = html.unescape(
+                raw_url
+            )
+
+            parsed = urllib.parse.urlparse(
+                url
+            )
+
+            params = urllib.parse.parse_qs(
+                parsed.query
+            )
+
             if "uddg" in params:
                 url = params["uddg"][0]
-            if not url.startswith(("http://", "https://")):
+
+            if not url.startswith(
+                ("http://", "https://")
+            ):
                 continue
+
             if url in seen:
                 continue
+
             seen.add(url)
-            results.append({"title": title, "url": url})
+
+            snippet_match = re.search(
+                r'<a[^>]+class="result__snippet"'
+                r'[^>]*>(.*?)</a>|'
+                r'<div[^>]+class="result__snippet"'
+                r'[^>]*>(.*?)</div>',
+                tail,
+                flags=re.I | re.S
+            )
+
+            snippet = ""
+
+            if snippet_match:
+                snippet = (
+                    snippet_match.group(1)
+                    or snippet_match.group(2)
+                    or ""
+                )
+
+                snippet = Text.clean(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            "",
+                            snippet
+                        )
+                    )
+                )
+
+            results.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet
+            })
+
             if len(results) >= amount:
                 break
+
+        # If DDG changes its HTML around the combined regex, fall back to
+        # the simpler link parser so search does not completely fail.
+        if not results:
+            pattern = (
+                r'<a[^>]+class="result__a"'
+                r'[^>]+href="([^"]+)"'
+                r'[^>]*>(.*?)</a>'
+            )
+
+            for raw_url, raw_title in re.findall(
+                pattern,
+                page,
+                flags=re.I | re.S
+            ):
+                title = Text.clean(
+                    html.unescape(
+                        re.sub(
+                            r"<[^>]+>",
+                            "",
+                            raw_title
+                        )
+                    )
+                )
+
+                url = html.unescape(
+                    raw_url
+                )
+
+                parsed = urllib.parse.urlparse(
+                    url
+                )
+
+                params = urllib.parse.parse_qs(
+                    parsed.query
+                )
+
+                if "uddg" in params:
+                    url = params["uddg"][0]
+
+                if not url.startswith(
+                    ("http://", "https://")
+                ):
+                    continue
+
+                if url in seen:
+                    continue
+
+                seen.add(url)
+
+                results.append({
+                    "title": title,
+                    "url": url,
+                    "snippet": ""
+                })
+
+                if len(results) >= amount:
+                    break
 
         return results
 
     def read(self, url):
         page = self.request(url)
+
         if not page:
             return ""
 
@@ -167,71 +404,139 @@ class Web:
             r"<svg.*?</svg>",
             r"<!--.*?-->"
         ):
-            page = re.sub(pattern, " ", page, flags=re.I | re.S)
+            page = re.sub(
+                pattern,
+                " ",
+                page,
+                flags=re.I | re.S
+            )
+
+        # Preserve block boundaries so the brain can recover real sentences.
+        page = re.sub(
+            r"</?(p|div|br|li|h[1-6]|article|section|main|header|footer|blockquote)[^>]*>",
+            "\n",
+            page,
+            flags=re.I
+        )
 
         page = re.sub(
-            r"</?(p|div|br|li|h[1-6]|article|section)[^>]*>",
-            "\n", page, flags=re.I
+            r"<[^>]+>",
+            " ",
+            page
         )
-        page = re.sub(r"<[^>]+>", " ", page)
-        page = html.unescape(page)
-        return re.sub(r"\s+", " ", page).strip()
+
+        page = html.unescape(
+            page
+        )
+
+        return re.sub(
+            r"[ \t]+",
+            " ",
+            page
+        ).strip()
 
     @staticmethod
     def domain(url):
         try:
-            d = urllib.parse.urlparse(url).netloc.lower()
-            return d[4:] if d.startswith("www.") else d or "unknown"
+            domain = urllib.parse.urlparse(
+                url
+            ).netloc.lower()
+
+            if domain.startswith("www."):
+                domain = domain[4:]
+
+            return domain or "unknown"
+
         except Exception:
             return "unknown"
 
 
 class Question:
-    GREETINGS = {"hi", "hello", "hey", "yo", "sup", "hiya", "howdy", "greetings"}
-    CASUAL = {"thanks", "thank", "cool", "nice", "awesome", "okay", "ok", "lol", "haha", "aight"}
+    GREETINGS = {
+        "hi", "hello", "hey", "yo",
+        "sup", "hiya", "howdy", "greetings"
+    }
+
+    CASUAL = {
+        "thanks", "thank", "cool", "nice",
+        "awesome", "okay", "ok", "lol",
+        "haha", "aight"
+    }
 
     @classmethod
     def classify(cls, text):
         stripped = text.strip()
         lower = stripped.lower()
-        words = set(Text.words(stripped))
+        words = set(
+            Text.words(stripped)
+        )
 
         if lower in cls.GREETINGS:
             return "greeting"
+
         if lower in cls.CASUAL:
             return "casual"
 
-        # Do not research fragments such as "aight", "lol", "cool", etc.
-        if len(words) <= 3 and "?" not in stripped:
-            return "conversation"
+        # Explicit question syntax always wins.
+        if stripped.endswith("?"):
+            return "research"
 
         question_words = {
-            "what", "why", "how", "when", "where", "who", "which",
-            "does", "did", "can", "could", "would", "should", "explain",
-            "define", "find", "search", "latest", "news", "current",
-            "today", "recent", "compare", "difference"
+            "what", "why", "how", "when",
+            "where", "who", "which", "does",
+            "did", "can", "could", "would",
+            "should", "explain", "define",
+            "find", "search", "latest", "news",
+            "current", "today", "recent",
+            "compare", "difference"
         }
 
-        if "?" in stripped or words & question_words:
+        if words & question_words:
             return "research"
+
+        # Short ordinary statements remain conversational.
+        if len(words) <= 3:
+            return "conversation"
 
         return "conversation"
 
     @classmethod
     def search_queries(cls, text):
         base = Text.clean(text)
-        candidates = [
+
+        q1 = base
+
+        # Remove filler from the alternate searches.
+        q2 = re.sub(
+            r"^(please\s+)?(can you\s+|could you\s+|would you\s+)?",
+            "",
             base,
-            base + " explanation",
-            base + " overview examples"
+            flags=re.I
+        ).strip()
+
+        candidates = [
+            q1,
+            q2 + " explanation",
+            q2 + " overview facts"
         ]
+
         result = []
         seen = set()
-        for q in candidates:
-            key = q.lower()
-            if key not in seen:
-                seen.add(key)
-                result.append(q)
+
+        for query in candidates:
+            query = Text.clean(query)
+
+            if not query:
+                continue
+
+            key = query.lower()
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            result.append(query)
+
         return result[:3]
 
 
@@ -247,12 +552,29 @@ class Research:
         print()
         print("> thinking about what to search...")
 
-        for query in Question.search_queries(question):
-            print("> searching: " + query)
-            for result in self.web.search(query, amount=5):
-                if result["url"] not in seen_urls:
-                    seen_urls.add(result["url"])
-                    all_results.append(result)
+        for query in Question.search_queries(
+            question
+        ):
+            print(
+                "> searching: "
+                + query
+            )
+
+            results = self.web.search(
+                query,
+                amount=6
+            )
+
+            for result in results:
+                url = result["url"]
+
+                if url in seen_urls:
+                    continue
+
+                seen_urls.add(url)
+                all_results.append(
+                    result
+                )
 
         if not all_results:
             print("> no web results found.")
@@ -261,77 +583,184 @@ class Research:
         pages = []
         seen_domains = set()
 
-        for result in all_results[:15]:
-            domain = self.web.domain(result["url"])
+        # Prefer a wide range of sites.
+        for result in all_results[:18]:
+            domain = self.web.domain(
+                result["url"]
+            )
+
             if domain in seen_domains:
                 continue
+
             seen_domains.add(domain)
 
-            print("> went to '" + domain + "'")
-            page = self.web.read(result["url"])
+            print(
+                "> went to '"
+                + domain
+                + "'"
+            )
 
-            if page:
+            page_text = self.web.read(
+                result["url"]
+            )
+
+            if page_text:
                 pages.append({
                     "title": result["title"],
                     "url": result["url"],
                     "domain": domain,
-                    "text": page
+                    "text": page_text
                 })
+
+            # Stop once enough independent pages have been read.
+            if len(pages) >= 8:
+                break
 
         if not pages:
             print("> the pages could not be read.")
             return []
 
         print()
-        print("> " + str(len(pages)) + " sources found")
+        print(
+            "> "
+            + str(len(pages))
+            + " sources found"
+        )
         print("> analyzing similar instances...")
 
-        facts = self.extract_facts(question, pages)
+        facts = self.extract_facts(
+            question,
+            pages
+        )
 
         print("> comparing information...")
-        facts = self.compare(facts)
+        facts = self.compare(
+            facts
+        )
 
         print("> checking for agreement across sources...")
         print("> checking for useful differences...")
         print("> forming answer...")
 
-        self.learn_research(question, facts)
+        self.learn_research(
+            question,
+            facts
+        )
+
         return facts
 
-    def extract_facts(self, question, pages):
-        keywords = set(Text.keywords(question))
+    def extract_facts(
+        self,
+        question,
+        pages
+    ):
+        keywords = set(
+            Text.keywords(question)
+        )
+
         candidates = []
+
+        # Search-result snippets are often cleaner than whole webpages,
+        # so use them as additional evidence when available.
+        for page in pages:
+            snippets = [
+                page.get(
+                    "snippet",
+                    ""
+                )
+            ]
+
+            for snippet in snippets:
+                clean = SmartEngine.clean_evidence(
+                    snippet
+                )
+
+                if not clean:
+                    continue
+
+                words = set(
+                    Text.words(clean)
+                )
+
+                if not (
+                    words & keywords
+                ):
+                    continue
+
+                candidates.append({
+                    "sentence": clean,
+                    "source": page["domain"],
+                    "title": page["title"],
+                    "url": page["url"],
+                    "score": 4.0
+                })
 
         for page in pages:
             count = 0
-            for sentence in Text.sentences(page["text"]):
-                sentence = Text.clean(sentence)
-                if not 45 <= len(sentence) <= 650:
+
+            for sentence in Text.sentences(
+                page["text"]
+            ):
+                sentence = SmartEngine.clean_evidence(
+                    sentence
+                )
+
+                if not 45 <= len(sentence) <= 520:
                     continue
 
-                words = set(Text.words(sentence))
-                overlap = len(words & keywords)
+                words = set(
+                    Text.words(sentence)
+                )
+
+                overlap = len(
+                    words & keywords
+                )
+
                 if overlap == 0:
                     continue
 
                 low = sentence.lower()
-                if any(x in low for x in (
-                    "skip to main content", "create an account", "sign in",
-                    "subscribe", "cookie policy", "external links", "isbn", "doi:"
+
+                # Avoid menus, author bios, references and other junk.
+                if any(marker in low for marker in (
+                    "skip to main content",
+                    "create an account",
+                    "sign in",
+                    "subscribe",
+                    "cookie policy",
+                    "external links",
+                    "isbn",
+                    "doi:",
+                    "references",
+                    "copyright"
                 )):
                     continue
 
-                score = overlap * 2
-                for marker in (
-                    "because", "means", "defined", "caused", "according",
-                    "is the", "refers to", "occurs when", "consists of",
-                    "known as", "results in", "used to", "allows"
-                ):
-                    if marker in low:
-                        score += 1.5
+                score = overlap * 2.0
 
-                if 90 <= len(sentence) <= 420:
-                    score += 1
+                for marker in (
+                    " is ",
+                    " are ",
+                    " means ",
+                    " refers to ",
+                    " because ",
+                    " occurs when ",
+                    " consists of ",
+                    " known as ",
+                    " used to ",
+                    " allows ",
+                    " results in ",
+                    " developed by "
+                ):
+                    if marker in (
+                        " " + low + " "
+                    ):
+                        score += 1.4
+
+                if (
+                    90 <= len(sentence) <= 380
+                ):
+                    score += 1.0
 
                 candidates.append({
                     "sentence": sentence,
@@ -342,56 +771,113 @@ class Research:
                 })
 
                 count += 1
-                if count >= 20:
+
+                if count >= 25:
                     break
 
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        return candidates[:100]
+        candidates.sort(
+            key=lambda item: item["score"],
+            reverse=True
+        )
+
+        return candidates[:120]
 
     def compare(self, facts):
         if not facts:
             return []
 
         common = Counter()
+
         for fact in facts:
-            for word in set(Text.words(fact["sentence"])):
-                if word not in Text.STOPWORDS and len(word) > 3:
+            for word in set(
+                Text.words(
+                    fact["sentence"]
+                )
+            ):
+                if (
+                    word not in Text.STOPWORDS
+                    and len(word) > 3
+                ):
                     common[word] += 1
 
         for fact in facts:
-            words = set(Text.words(fact["sentence"]))
-            fact["agreement"] = sum(common[w] for w in words if w in common)
-            fact["final_score"] = fact["score"] + fact["agreement"] * 0.18
+            words = set(
+                Text.words(
+                    fact["sentence"]
+                )
+            )
 
-        facts.sort(key=lambda x: x["final_score"], reverse=True)
+            fact["agreement"] = sum(
+                common[word]
+                for word in words
+                if word in common
+            )
+
+            fact["final_score"] = (
+                fact["score"]
+                + fact["agreement"] * 0.15
+            )
+
+        facts.sort(
+            key=lambda item: item["final_score"],
+            reverse=True
+        )
 
         chosen = []
         signatures = []
+
         for fact in facts:
-            signature = set(Text.words(fact["sentence"]))
+            signature = set(
+                Text.words(
+                    fact["sentence"]
+                )
+            )
+
             if not signature:
                 continue
 
             duplicate = False
+
             for old in signatures:
-                smaller = min(len(signature), len(old))
-                if smaller and len(signature & old) / smaller > 0.70:
+                smaller = min(
+                    len(signature),
+                    len(old)
+                )
+
+                if (
+                    smaller
+                    and
+                    len(signature & old)
+                    / smaller > 0.72
+                ):
                     duplicate = True
                     break
 
             if duplicate:
                 continue
 
-            chosen.append(fact)
-            signatures.append(signature)
-            if len(chosen) >= 30:
+            chosen.append(
+                fact
+            )
+            signatures.append(
+                signature
+            )
+
+            if len(chosen) >= 40:
                 break
 
         return chosen
 
-    def learn_research(self, question, facts):
-        topic = SmartEngine.topic(question)
-        for fact in facts[:20]:
+    def learn_research(
+        self,
+        question,
+        facts
+    ):
+        topic = SmartEngine.topic(
+            question
+        )
+
+        for fact in facts[:25]:
             self.memory.learn_topic(
                 topic,
                 {
@@ -401,9 +887,15 @@ class Research:
                     "url": fact["url"]
                 }
             )
+
         print(
-            "> learned " + str(min(20, len(facts))) +
-            " useful findings about " + topic + "."
+            "> learned "
+            + str(
+                min(25, len(facts))
+            )
+            + " useful findings about "
+            + topic
+            + "."
         )
 
 
@@ -413,216 +905,344 @@ class Learner:
 
     def learn(self, message):
         patterns = [
-            (r"my name is (.+)", "name"),
-            (r"i am called (.+)", "name"),
-            (r"my favourite colour is (.+)", "favourite_colour"),
-            (r"my favorite colour is (.+)", "favourite_colour"),
-            (r"my favourite color is (.+)", "favourite_colour"),
-            (r"my favorite color is (.+)", "favourite_colour")
+            (
+                r"my name is (.+)",
+                "name"
+            ),
+            (
+                r"i am called (.+)",
+                "name"
+            ),
+            (
+                r"my favourite colour is (.+)",
+                "favourite_colour"
+            ),
+            (
+                r"my favorite colour is (.+)",
+                "favourite_colour"
+            ),
+            (
+                r"my favourite color is (.+)",
+                "favourite_colour"
+            ),
+            (
+                r"my favorite color is (.+)",
+                "favourite_colour"
+            )
         ]
+
         for pattern, key in patterns:
-            match = re.search(pattern, message, re.I)
+            match = re.search(
+                pattern,
+                message,
+                re.I
+            )
+
             if match:
-                self.memory.remember(key, match.group(1).strip())
+                self.memory.remember(
+                    key,
+                    match.group(1).strip()
+                )
                 return True
+
         return False
 
 
 class Voice:
     def __init__(self):
         self.memory = Memory()
-        self.learner = Learner(self.memory)
-        self.research = Research(self.memory)
+        self.learner = Learner(
+            self.memory
+        )
+        self.research = Research(
+            self.memory
+        )
+
         self.last_facts = []
         self.last_question = ""
         self.used_sentences = []
 
     def respond(self, message):
-        # Continue the previous subject without repeating the same evidence.
-        if FOLLOWUP_RE.match(message.strip()) and self.last_facts:
+        self.learner.learn(
+            message
+        )
+
+        # Follow-up questions reuse the previous research pass first.
+        if (
+            FOLLOWUP_RE.match(
+                message.strip()
+            )
+            and self.last_facts
+        ):
+            print()
+            print(
+                "> continuing from the previous research..."
+            )
+
             evidence = SmartEngine.rank(
                 self.last_question,
                 self.last_facts,
-                limit=6,
+                limit=7,
                 avoid=self.used_sentences
             )
+
             if evidence:
-                self.used_sentences.extend(evidence)
-                text = SmartEngine.synthesize(
-                    SmartEngine.topic(self.last_question),
+                self.used_sentences.extend(
+                    evidence
+                )
+
+                plan = SmartEngine.synthesize(
+                    SmartEngine.topic(
+                        self.last_question
+                    ),
                     evidence,
                     question=self.last_question
                 )
-                return VoiceLanguage.speak_answer(text)
+
+                return VoiceLanguage.speak_answer(
+                    plan
+                )
+
             return VoiceLanguage.no_more_evidence()
 
-        kind = Question.classify(message)
+        kind = Question.classify(
+            message
+        )
 
-        if kind == "greeting":
-            return VoiceLanguage.casual(message)
+        if kind in (
+            "greeting",
+            "casual"
+        ):
+            return VoiceLanguage.casual(
+                message
+            )
 
-        if kind == "casual":
-            return VoiceLanguage.casual(message)
+        if kind != "research":
+            return self.conversation(
+                message
+            )
 
-        memory_response = self.memory_question(message)
-        if memory_response:
-            return memory_response
+        # Summary appears only when we actually research.
+        print()
+        print(
+            "> interpreting your question..."
+        )
+        print()
+        print(
+            "V.O.I.C.E.:"
+        )
+        print(
+            '"'
+            + VoiceLanguage.opening_summary(
+                message
+            )
+            + '"'
+        )
+        print()
 
-        # The poetic summary only appears before an actual research question.
-        if kind == "research":
-            print()
-            print("> interpreting your question...")
-            print()
-            print("V.O.I.C.E.:")
-            print('"' + VoiceLanguage.opening_summary(message) + '"')
-            print()
+        facts = self.research.investigate(
+            message
+        )
 
-            facts = self.research.investigate(message)
-
-            # Prefer fresh web research. Only fall back to learned material
-            # if the network supplied nothing usable, so old memory cannot
-            # contaminate a fresh answer.
-            if not facts:
-                remembered = SmartEngine.from_memory(
-                    message,
-                    self.memory.data.get("learned_topics", {})
+        # Fresh research has priority.
+        if not facts:
+            remembered = SmartEngine.from_memory(
+                message,
+                self.memory.data.get(
+                    "learned_topics",
+                    {}
                 )
-                if remembered:
-                    print("> fresh research was unavailable; using learned knowledge.")
-                    facts = [
-                        {
-                            "sentence": sentence,
-                            "source": "local memory",
-                            "title": "V.O.I.C.E. memory",
-                            "url": "",
-                            "score": 1.0
-                        }
-                        for sentence in remembered[:8]
-                    ]
+            )
 
-            if facts:
-                evidence = SmartEngine.rank(
-                    message,
-                    facts,
-                    limit=6
+            if remembered:
+                print(
+                    "> fresh research was unavailable; "
+                    "using learned knowledge."
                 )
-                text = SmartEngine.synthesize(
-                    SmartEngine.topic(message),
-                    evidence,
-                    question=message
-                )
-                response = VoiceLanguage.speak_answer(text)
 
-                self.last_facts = facts
-                self.last_question = message
-                self.used_sentences = list(evidence)
-                return response
+                facts = [
+                    {
+                        "sentence": sentence,
+                        "source": "local memory",
+                        "title": "V.O.I.C.E. memory",
+                        "url": "",
+                        "score": 1.0
+                    }
+                    for sentence in remembered[:10]
+                ]
 
-            return self.conversation(message)
+        if not facts:
+            return (
+                '"I found too little evidence to answer with care,\n'
+                'I would rather admit that than invent what is not there."'
+            )
 
-        return self.conversation(message)
+        evidence = SmartEngine.rank(
+            message,
+            facts,
+            limit=7
+        )
 
-    def memory_question(self, message):
+        plan = SmartEngine.synthesize(
+            SmartEngine.topic(message),
+            evidence,
+            question=message
+        )
+
+        self.last_facts = facts
+        self.last_question = message
+        self.used_sentences = list(
+            evidence
+        )
+
+        return VoiceLanguage.speak_answer(
+            plan
+        )
+
+    def memory_question(
+        self,
+        message
+    ):
         lower = message.lower()
 
         if "what is my name" in lower:
-            name = self.memory.get("name")
+            name = self.memory.get(
+                "name"
+            )
+
             if name:
                 return (
                     f'"Your name is {name}, a fact that I retain;\n'
                     'I remember what you tell me and can return it again."'
                 )
 
-        if any(
-            phrase in lower
-            for phrase in (
-                "favourite colour", "favorite colour",
-                "favourite color", "favorite color"
-            )
-        ):
-            colour = self.memory.get("favourite_colour")
-            if colour:
-                return (
-                    f'"You chose {colour}, a choice that I retain;\n'
-                    'A small detail stored to be returned again."'
-                )
-
         return None
 
-    def conversation(self, message):
+    def conversation(
+        self,
+        message
+    ):
         lower = message.lower().strip()
 
-        if "who are you" in lower:
-            return VoiceLanguage.casual(message)
+        memory_response = self.memory_question(
+            message
+        )
 
-        if "how are you" in lower or "how are you doing" in lower:
-            return random.choice([
-                '"I am doing well, and ready to converse;\n'
-                'Give me a subject and I shall make it clearer in verse."',
-                '"Everything is steady, and the conversation is clear;\n'
-                'Give me your next thought and I shall meet it here."'
-            ])
+        if memory_response:
+            return memory_response
 
         if "what do you think" in lower:
             return (
                 '"Give me the subject and I will weigh what is known,\n'
-                'Compare the available evidence, and form a view of my own."'
+                'Compare the evidence and form a reasoned view of my own."'
             )
 
-        # Long statements can still request context, but short chat stays chat.
-        if len(Text.words(message)) >= 8:
+        if "who are you" in lower or "what are you" in lower:
+            return VoiceLanguage.casual(
+                message
+            )
+
+        # A long statement may still be asking for context.
+        if len(
+            Text.words(message)
+        ) >= 12:
             print()
-            print("> detecting a request for context...")
-            facts = self.research.investigate(message)
+            print(
+                "> detecting a request for context..."
+            )
+
+            facts = self.research.investigate(
+                message
+            )
+
             if facts:
-                evidence = SmartEngine.rank(message, facts, limit=6)
-                text = SmartEngine.synthesize(
+                evidence = SmartEngine.rank(
+                    message,
+                    facts,
+                    limit=7
+                )
+
+                plan = SmartEngine.synthesize(
                     SmartEngine.topic(message),
                     evidence,
                     question=message
                 )
+
                 self.last_facts = facts
                 self.last_question = message
-                self.used_sentences = list(evidence)
-                return VoiceLanguage.speak_answer(text)
+                self.used_sentences = list(
+                    evidence
+                )
 
-        return VoiceLanguage.casual(message)
+                return VoiceLanguage.speak_answer(
+                    plan
+                )
+
+        return VoiceLanguage.casual(
+            message
+        )
 
     def start(self):
         print()
-        print("╔══════════════════════════════════════════════════╗")
-        print("║                 V . O . I . C . E                ║")
-        print("╚══════════════════════════════════════════════════╝")
+        print(
+            "╔══════════════════════════════════════════════════╗"
+        )
+        print(
+            "║                 V . O . I . C . E                ║"
+        )
+        print(
+            "╚══════════════════════════════════════════════════╝"
+        )
         print()
-        print("  BRAIN ........ ONLINE")
-        print("  MEMORY ....... ONLINE")
-        print("  NETWORK ...... READY")
+        print(
+            "  BRAIN ........ ONLINE"
+        )
+        print(
+            "  MEMORY ....... ONLINE"
+        )
+        print(
+            "  NETWORK ...... READY"
+        )
         print()
-        print("  Ask a question and I will research it, compare it,")
-        print("  learn useful findings, and answer you in rhyme.")
+        print(
+            "  Ask a question and I will research it, compare it,"
+        )
+        print(
+            "  learn useful findings, and answer you in rhyme."
+        )
         print()
-        print("  Type 'quit' to terminate.")
+        print(
+            "  Type 'quit' to terminate."
+        )
         print()
 
         while True:
             try:
-                message = input("YOU: ").strip()
+                message = input(
+                    "YOU: "
+                ).strip()
+
                 if not message:
                     continue
 
-                if message.lower() in {"quit", "exit", "shutdown"}:
+                if message.lower() in {
+                    "quit", "exit", "shutdown"
+                }:
                     print()
                     print(
-                        'V.O.I.C.E.: "Until the next question, the conversation can wait;\n'
-                        'Return when you are ready, and we shall continue at that date."'
+                        'V.O.I.C.E.: "The conversation can end, and begin again;\n'
+                        'Return with another question when you are ready then."'
                     )
                     break
 
-                self.learner.learn(message)
-                response = self.respond(message)
+                response = self.respond(
+                    message
+                )
 
                 print()
-                print("V.O.I.C.E.:")
+                print(
+                    "V.O.I.C.E.:"
+                )
                 print(response)
                 print()
 
@@ -634,15 +1254,19 @@ class Voice:
             except KeyboardInterrupt:
                 print()
                 print(
-                    'V.O.I.C.E.: "The session will pause, and the conversation can end;\n'
-                    'Return when you are ready to begin again."'
+                    'V.O.I.C.E.: "The session can pause; we can speak again,\n'
+                    'Return whenever you are ready to begin."'
                 )
                 break
 
             except Exception as error:
                 print()
-                print("V.O.I.C.E. ERROR:")
-                print(str(error))
+                print(
+                    "V.O.I.C.E. ERROR:"
+                )
+                print(
+                    str(error)
+                )
                 print()
 
 

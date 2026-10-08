@@ -1,8 +1,12 @@
 """
 V.O.I.C.E. LANGUAGE LAYER
+-------------------------
+Controls HOW V.O.I.C.E. speaks.
 
-Controls HOW V.O.I.C.E. speaks: personality, summaries, greetings,
-and rhyme. It does not search the web and does not decide factual content.
+No popup.
+No speech.
+No "wire/circuit" or "evil robot" language.
+The language layer does not browse the web or decide factual content.
 """
 
 import random
@@ -10,7 +14,7 @@ import re
 
 
 class VoiceLanguage:
-    """A calm, intelligent, poetic voice. No robot/wire/evil language."""
+    """Calm, intelligent, poetic, and concise."""
 
     @classmethod
     def opening_summary(cls, question: str) -> str:
@@ -20,8 +24,8 @@ class VoiceLanguage:
             return (
                 "You ask what waits beyond where the bright stars cease,\n"
                 "Where gravity grows savage and denies the light its release.\n"
-                "A question has entered the darker edge of space—\n"
-                "I'll search what is known and map that hidden place."
+                "I'll search what is known and compare the clues,\n"
+                "Then bring back the clearest answer the evidence can choose."
             )
 
         if any(x in q for x in ("quantum", "particle", "physics")):
@@ -29,18 +33,18 @@ class VoiceLanguage:
                 "You ask where the smallest hidden rules begin,\n"
                 "Where certainty grows strange and probability can win.\n"
                 "I'll trace what theory and experiment reveal,\n"
-                "Then return with the pattern the evidence can seal."
+                "Then return with the strongest picture the evidence can seal."
             )
 
         if any(x in q for x in ("electricity", "energy", "current")):
             return (
                 "You seek the force behind the systems that we use,\n"
-                "The motion, charge and energy that make the difference clear and true.\n"
-                "I'll follow the evidence and separate fact from flame,\n"
-                "Then bring back a clearer answer to the question that you name."
+                "The movement, charge and energy that make the difference clear and true.\n"
+                "I'll compare what reliable sources explain,\n"
+                "Then bring the useful answer back again."
             )
 
-        if any(x in q for x in ("mathematics", "math")):
+        if any(x in q for x in ("mathematics", "math", "maths")):
             return (
                 "You ask about the language built from pattern, proof and form,\n"
                 "Where numbers, structures and relations keep their order through the storm.\n"
@@ -60,49 +64,70 @@ class VoiceLanguage:
                 "I'll sift through information and keep the useful part.\n"
                 "The weaker claims will fade while stronger evidence stays,\n"
                 "Then I'll return with something clear and worthy of your gaze."
-            )
+            ),
         ])
 
     @classmethod
     def speak_answer(cls, answer: str) -> str:
-        """Render the smart layer's factual answer as rhyming dialogue."""
+        """Turn a compact factual plan into a coherent rhyming answer."""
         if not answer:
             return (
                 '"The evidence is too thin for a claim I can defend,\n'
                 'Give me another angle and I shall search again."'
             )
 
-        text = re.sub(r"\[[0-9]+\]", "", answer)
-        text = re.sub(r"https?://\S+", "", text)
-        text = re.sub(r"\s+", " ", text).strip().strip('"')
+        text = re.sub(r"\\[[0-9]+\\]", "", answer)
+        text = re.sub(r"https?://\\S+", "", text)
+        text = re.sub(r"\\s+", " ", text).strip().strip('"')
 
-        pieces = [p.strip() for p in text.split("||") if p.strip()]
+        pieces = [
+            p.strip(" .,:;")
+            for p in text.split("||")
+            if p.strip()
+        ]
+
         if not pieces:
             pieces = [text]
 
-        lines = []
+        topic = pieces[0]
+        details = pieces[1:4]
 
-        # Every factual piece gets a rhyming companion line.
-        pair_templates = [
-            ("{a}.", "That is the central point the evidence has made plain."),
-            ("{a}.", "It fits the wider pattern and explains the matter again."),
-            ("{a}.", "Together with the evidence, it gives the clearest view."),
-            ("{a}.", "The scattered details now connect into something true.")
+        # Keep the actual researched statement intact, then add short
+        # connective lines that rhyme without inventing new facts.
+        lines = [topic + "."]
+
+        rhyme_pairs = [
+            "That is the central idea, stated clearly and plain.",
+            "That is the central idea, and the evidence says the same.",
+            "Those details fit together and make the pattern plain."
         ]
 
-        for i, piece in enumerate(pieces[:4]):
-            piece = piece.rstrip(" .,:;")
-            # Keep individual evidence statements manageable.
-            if len(piece) > 320:
-                piece = piece[:317].rsplit(" ", 1)[0] + "..."
-            left, right = pair_templates[i % len(pair_templates)]
-            lines.append(left.format(a=piece))
-            lines.append(right)
+        for i, detail in enumerate(details):
+            if i == 0:
+                lines.append(
+                    "It gives a wider picture of the subject you came to explain:"
+                )
+                lines.append(detail + ".")
+            elif i == 1:
+                lines.append(
+                    "Another part of the evidence extends that view,"
+                )
+                lines.append(
+                    detail + "."
+                )
+            else:
+                lines.append(
+                    "And one final point helps the meaning come through:"
+                )
+                lines.append(
+                    detail + "."
+                )
 
-        lines.extend([
-            "The facts provide the substance; the pattern gives it form,",
-            "I have weighed what was found and made the answer clear and warm."
-        ])
+        # A restrained ending keeps the answer coherent even though the
+        # underlying system has no generative language model.
+        lines.append(
+            rhyme_pairs[min(len(details), len(rhyme_pairs) - 1)]
+        )
 
         return '"' + "\n".join(lines) + '"'
 
@@ -110,11 +135,20 @@ class VoiceLanguage:
     def casual(cls, message: str) -> str:
         q = message.lower().strip()
 
-        if q in {"hi", "hello", "hey", "yo", "greetings", "hiya", "howdy"}:
-            return '"Hello, the question is yours to say,\nTell me what you seek today."'
+        if q in {
+            "hi", "hello", "hey", "yo",
+            "greetings", "hiya", "howdy"
+        }:
+            return (
+                '"Hello, the question is yours to say,\n'
+                'Tell me what you seek today."'
+            )
 
         if "thank" in q:
-            return '"You are welcome; your thanks are understood,\nAsk what you need, and I will help where I could."'
+            return (
+                '"You are welcome; your thanks are understood,\n'
+                'Ask what you need, and I will help where I could."'
+            )
 
         if "who are you" in q or "what are you" in q:
             return (
@@ -124,7 +158,7 @@ class VoiceLanguage:
 
         return (
             '"Your thought is clear; I understand the cue,\n'
-            'Continue with the subject and I will work it through with you."'
+            'Give me the subject and I will work it through with you."'
         )
 
     @classmethod

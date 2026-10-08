@@ -1,46 +1,62 @@
-# V.O.I.C.E. backend
+# V.O.I.C.E. fixed deployment
 
-This folder is ready for a Python web service host such as Render.
+This package contains the corrected Python brain and backend.
 
-## Local Mac test
+Put these files in your Render repository:
 
-```bash
-cd voice-bot
-python3 backend.py
+- `backend.py`
+- `voice.py`
+- `smart.py`
+- `language.py`
+- `requirements.txt`
+- `render.yaml`
+
+Your GitHub Pages `index.html` should POST to:
+
+`https://v-o-i-c-e-ai.onrender.com/chat`
+
+## What was fixed
+
+1. Explicit questions such as `what is mathematics` always enter research.
+2. Webpage block boundaries are preserved, so an entire page is not treated
+   as one giant sentence.
+3. DuckDuckGo result snippets can be used as cleaner evidence.
+4. Navigation, citation and metadata junk is filtered more aggressively.
+5. Definition questions strongly prefer explicit definitions.
+6. Research learns up to 25 useful findings per topic.
+7. The final language layer receives a compact answer plan rather than raw
+   webpage text.
+8. `/health` reports the backend version as `research-v2`.
+
+## Deploy
+
+Push these files to GitHub.
+
+In Render, either create/update the web service from the repository or use
+the included `render.yaml`.
+
+Build:
+    pip install -r requirements.txt
+
+Start:
+    python backend.py
+
+Then verify:
+
+    https://v-o-i-c-e-ai.onrender.com/health
+
+The response should contain:
+
+    "brain": "online"
+    "version": "research-v2"
+
+## Connect GitHub Pages
+
+Your frontend should use:
+
+```javascript
+const BACKEND_URL =
+    "https://v-o-i-c-e-ai.onrender.com/chat";
 ```
 
-Then, in another Terminal:
-
-```bash
-curl http://127.0.0.1:8765/health
-```
-
-Test chat:
-
-```bash
-curl -X POST http://127.0.0.1:8765/chat \\
-  -H "Content-Type: application/json" \\
-  -d '{"message":"what is mathematics?"}'
-```
-
-## Render
-
-Connect this folder/repository to a Render Web Service. The included
-`render.yaml` starts `backend.py`. Render supplies the `PORT` environment
-variable automatically.
-
-After deployment, use:
-
-```text
-https://YOUR-SERVICE.onrender.com/chat
-```
-
-as `BACKEND_URL` in your GitHub Pages `index.html`.
-
-## Important
-
-The supplied brain is standard-library-only and performs its own web
-research. No AI API key is used by these files.
-
-The JSON memory file is local process storage. On a free ephemeral server,
-that file should not be treated as permanent storage across restarts.
+Then push the frontend to GitHub Pages.
