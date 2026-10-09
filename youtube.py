@@ -16,6 +16,7 @@ say so plainly rather than invent a transcript.
 import html
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,53 +51,81 @@ YOUTUBE_RE = re.compile(
 
 
 class YouTube:
-    def _get(self, url, timeout=15):
-        """Like Web.request, but with real browser headers and with the
-        actual failure reason printed (it flows into the UI's research
-        panel) instead of being swallowed as a bare empty string."""
-        try:
-            request = urllib.request.Request(
-                url,
-                headers=BROWSER_HEADERS
-            )
+    def __init__(self):
+        # Set by _get() on failure so callers can tell "blocked" apart
+        # from "bad link" apart from "network hiccup" and say something
+        # honest to the person instead of one generic error for all three.
+        self.last_error = None
 
-            with urllib.request.urlopen(
-                request,
-                timeout=timeout
-            ) as response:
-                return response.read().decode(
-                    "utf-8",
-                    errors="ignore"
+    def _get(self, url, timeout=15, retries=1):
+        """Like Web.request, but with real browser headers, one polite
+        retry on a rate limit, and the actual failure reason printed
+        (it flows into the UI's research panel) instead of being
+        swallowed as a bare empty string."""
+        for attempt in range(retries + 1):
+            try:
+                request = urllib.request.Request(
+                    url,
+                    headers=BROWSER_HEADERS
                 )
 
-        except urllib.error.HTTPError as exc:
-            print(
-                "> YouTube fetch failed: HTTP "
-                + str(exc.code)
-                + " ("
-                + ("likely blocked the request" if exc.code in (403, 429) else "unexpected status")
-                + ") for "
-                + url
-            )
-            return ""
+                with urllib.request.urlopen(
+                    request,
+                    timeout=timeout
+                ) as response:
+                    self.last_error = None
+                    return response.read().decode(
+                        "utf-8",
+                        errors="ignore"
+                    )
 
-        except urllib.error.URLError as exc:
-            print(
-                "> YouTube fetch failed: "
-                + str(exc.reason)
-                + " for "
-                + url
-            )
-            return ""
+            except urllib.error.HTTPError as exc:
+                if exc.code in (403, 429):
+                    self.last_error = "blocked"
+                    reason = "likely blocked/rate-limited the request"
+                elif exc.code == 404:
+                    self.last_error = "notfound"
+                    reason = "video not found"
+                else:
+                    self.last_error = "http_" + str(exc.code)
+                    reason = "unexpected status"
 
-        except (TimeoutError, OSError) as exc:
-            print(
-                "> YouTube fetch failed: "
-                + str(exc)
-                + " for "
-                + url
-            )
-            return ""
+                print(
+                    "> YouTube fetch failed: HTTP "
+                    + str(exc.code)
+                    + " (" + reason + ") for "
+                    + url
+                )
+
+                # A 429 can be transient (a brief burst, not a hard ban) —
+                # one short backoff is worth it; anything else, don't.
+                if exc.code == 429 and attempt < retries:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+
+                return ""
+
+            except urllib.error.URLError as exc:
+                self.last_error = "network"
+                print(
+                    "> YouTube fetch failed: "
+                    + str(exc.reason)
+                    + " for "
+                    + url
+                )
+                return ""
+
+            except (TimeoutError, OSError) as exc:
+                self.last_error = "network"
+                print(
+                    "> YouTube fetch failed: "
+                    + str(exc)
+                    + " for "
+                    + url
+                )
+                return ""
+
+        return ""
 
     @staticmethod
     def find_link(text):
@@ -128,7 +157,7 @@ class YouTube:
             return None, None
 
         watch_url = "https://www.youtube.com/watch?v=" + video_id
-        page = self._get(watch_url)
+        page = self._get(watch_url, retries=1)
 
         if not page:
             return None, None
