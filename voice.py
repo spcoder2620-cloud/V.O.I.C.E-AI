@@ -887,6 +887,20 @@ class Voice:
         )
 
         if not title:
+            if self.youtube.last_error == "blocked":
+                return (
+                    '"YouTube is turning away requests sent from where I run,\n'
+                    'too many automated calls already, it seems, from this one.\n'
+                    'Wait a little while and try that link again,\n'
+                    'the block is on the connection, not on you or when."'
+                )
+
+            if self.youtube.last_error == "notfound":
+                return (
+                    '"That address points to no video I can find,\n'
+                    'check the link again — a typo is the usual kind."'
+                )
+
             return (
                 '"That link did not lead me to a video I could reach,\n'
                 'check the address, and I will try again to teach."'
