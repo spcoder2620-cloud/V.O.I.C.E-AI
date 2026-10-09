@@ -41,6 +41,54 @@ OPINION_TRIGGER_RE = re.compile(
     re.I
 )
 
+# "learn transcript: <title>" then the transcript on the next line(s) —
+# this exists so the person can paste a video's transcript straight in
+# instead of relying on fetching it from YouTube, which can be blocked
+# (see youtube.py).
+TRANSCRIPT_PREFIX_RE = re.compile(
+    r"^\s*learn\s+transcript\s*:?\s*",
+    re.I
+)
+
+
+def parse_transcript_command(message):
+    """Returns (title, transcript) if the message is a
+    "learn transcript" command, else None. Accepts either:
+        learn transcript: <title>
+        <transcript...>
+    or, for a single-line paste with no newline available:
+        learn transcript: <title> || <transcript...>
+    If no title is given either way, one is drawn from the opening of
+    the transcript itself."""
+    match = TRANSCRIPT_PREFIX_RE.match(message)
+
+    if not match:
+        return None
+
+    rest = message[match.end():]
+
+    if "\n" in rest:
+        title, body = rest.split("\n", 1)
+    elif "||" in rest:
+        title, body = rest.split("||", 1)
+    else:
+        title, body = "", rest
+
+    title = title.strip()
+    body = body.strip()
+
+    if not body:
+        return None
+
+    if not title:
+        opening = Text.sentences(body)
+        title = opening[0] if opening else body
+
+        if len(title) > 80:
+            title = title[:80].rsplit(" ", 1)[0] + "..."
+
+    return title, body
+
 
 class Memory:
     def __init__(self):
@@ -675,6 +723,20 @@ class Voice:
                 link
             )
 
+        # A pasted transcript, explicitly flagged with "learn transcript:",
+        # also takes priority over normal conversation handling.
+        transcript_command = parse_transcript_command(
+            message
+        )
+
+        if transcript_command:
+            title, body = transcript_command
+
+            return self.learn_from_transcript(
+                title,
+                body
+            )
+
         self.learner.learn(
             message
         )
@@ -876,47 +938,11 @@ class Voice:
 
         return None
 
-    def learn_from_youtube(self, url):
-        print()
-        print(
-            "> found a YouTube link; fetching the video..."
-        )
-
-        title, transcript = self.youtube.fetch(
-            url
-        )
-
-        if not title:
-            if self.youtube.last_error == "blocked":
-                return (
-                    '"YouTube is turning away requests sent from where I run,\n'
-                    'too many automated calls already, it seems, from this one.\n'
-                    'Wait a little while and try that link again,\n'
-                    'the block is on the connection, not on you or when."'
-                )
-
-            if self.youtube.last_error == "notfound":
-                return (
-                    '"That address points to no video I can find,\n'
-                    'check the link again — a typo is the usual kind."'
-                )
-
-            return (
-                '"That link did not lead me to a video I could reach,\n'
-                'check the address, and I will try again to teach."'
-            )
-
-        if not transcript:
-            return (
-                '"I found the video titled ' + title + ',\n'
-                'but no captions were there for me to read and weigh —\n'
-                'without a transcript I have no text to learn today."'
-            )
-
-        print(
-            "> reading the transcript..."
-        )
-
+    def _learn_from_text(self, title, transcript, source_domain, source_url):
+        """Shared by learn_from_youtube() and learn_from_transcript():
+        turns a block of text into stored facts plus an evidence-checked
+        opinion. Returns the opinion dict, or None if nothing in the
+        text was usable."""
         topic = SmartEngine.topic(
             title
         )
@@ -943,24 +969,21 @@ class Voice:
 
             facts.append({
                 "sentence": sentence,
-                "source": "youtube.com",
+                "source": source_domain,
                 "title": title,
-                "url": url,
+                "url": source_url or "",
                 "score": 1.0 + overlap * 1.5
             })
 
         if not facts:
-            return (
-                '"I read "' + title + '" from end to end,\n'
-                'but found no steady claims that evidence could defend."'
-            )
+            return None
 
         facts = self.research.compare(
             facts
         )
 
         print(
-            "> learning what the video says..."
+            "> learning what it says..."
         )
 
         for fact in facts[:25]:
@@ -1002,6 +1025,86 @@ class Voice:
         )[topic] = opinion
 
         self.memory.save()
+
+        return opinion
+
+    def learn_from_youtube(self, url):
+        print()
+        print(
+            "> found a YouTube link; fetching the video..."
+        )
+
+        title, transcript = self.youtube.fetch(
+            url
+        )
+
+        if not title:
+            if self.youtube.last_error == "blocked":
+                return (
+                    '"YouTube is turning away requests sent from where I run,\n'
+                    'too many automated calls already, it seems, from this one.\n'
+                    'Wait a little while and try that link again,\n'
+                    'or paste the transcript straight into the line."'
+                )
+
+            if self.youtube.last_error == "notfound":
+                return (
+                    '"That address points to no video I can find,\n'
+                    'check the link again — a typo is the usual kind."'
+                )
+
+            return (
+                '"That link did not lead me to a video I could reach,\n'
+                'check the address, or paste the transcript in instead."'
+            )
+
+        if not transcript:
+            return (
+                '"I found the video titled ' + title + ',\n'
+                'but no captions were there for me to read and weigh —\n'
+                'paste the transcript in yourself and I will learn it today."'
+            )
+
+        print(
+            "> reading the transcript..."
+        )
+
+        opinion = self._learn_from_text(
+            title,
+            transcript,
+            "youtube.com",
+            url
+        )
+
+        if opinion is None:
+            return (
+                '"I read "' + title + '" from end to end,\n'
+                'but found no steady claims that evidence could defend."'
+            )
+
+        return VoiceLanguage.opinion_formed(
+            title,
+            opinion
+        )
+
+    def learn_from_transcript(self, title, transcript):
+        print()
+        print(
+            "> reading the transcript you gave me..."
+        )
+
+        opinion = self._learn_from_text(
+            title,
+            transcript,
+            "pasted transcript",
+            ""
+        )
+
+        if opinion is None:
+            return (
+                '"I read "' + title + '" from end to end,\n'
+                'but found no steady claims that evidence could defend."'
+            )
 
         return VoiceLanguage.opinion_formed(
             title,

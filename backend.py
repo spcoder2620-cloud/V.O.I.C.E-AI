@@ -158,7 +158,9 @@ class Handler(BaseHTTPRequestHandler):
                     "Request body is empty."
                 )
 
-            if length > 100_000:
+            # Raised from 100_000 so a pasted video transcript (often
+            # tens of thousands of characters, JSON-wrapped) actually fits.
+            if length > 400_000:
                 raise ValueError(
                     "Request body is too large."
                 )
@@ -188,7 +190,9 @@ class Handler(BaseHTTPRequestHandler):
                     "Message cannot be empty."
                 )
 
-            if len(message) > 10_000:
+            # Raised from 10_000 so "learn transcript: ..." can carry a
+            # real transcript (roughly a 2-hour video's worth of speech).
+            if len(message) > 200_000:
                 raise ValueError(
                     "Message is too long."
                 )

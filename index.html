@@ -16,9 +16,9 @@ body{overflow:hidden}
 #screen{flex:1;overflow:auto;padding:11px 14px 18px;white-space:pre-wrap;word-break:break-word;line-height:1.45}
 #screen::-webkit-scrollbar{width:10px}#screen::-webkit-scrollbar-track{background:#050505}#screen::-webkit-scrollbar-thumb{background:#222}
 .line{margin:0 0 7px}.system{color:#929292}.research{color:#666}.prompt{color:#6dfc78}.reply{color:#d7d7d7}.heading{color:#82c7ff}.error{color:#ff6a6a}
-.inputrow{display:flex;align-items:center;flex:0 0 auto;padding:0 14px 14px}
-.prompttext{color:#6dfc78;margin-right:8px;white-space:nowrap}
-#input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#d7d7d7;caret-color:#fff;font:inherit;padding:0}
+.inputrow{display:flex;align-items:flex-start;flex:0 0 auto;padding:0 14px 14px}
+.prompttext{color:#6dfc78;margin-right:8px;white-space:nowrap;line-height:1.45;padding-top:1px}
+#input{flex:1;min-width:0;background:transparent;border:0;outline:0;resize:none;overflow-y:hidden;color:#d7d7d7;caret-color:#fff;font:inherit;line-height:1.45;padding:0;max-height:220px}
 #input:disabled{opacity:.6}
 @media(max-width:600px){body{font-size:13px}.title{font-size:11px}.inputrow{padding:0 10px 10px}#screen{padding:10px}}
 </style>
@@ -31,12 +31,13 @@ body{overflow:hidden}
   </div>
   <div id="screen">
     <div class="line heading">V . O . I . C . E .</div>
-    <div class="line system">Type a question, or paste a YouTube link and I will learn from it.</div>
+    <div class="line system">Type a question, paste a YouTube link, or paste a transcript as:</div>
+    <div class="line system">learn transcript: &lt;title&gt; (then Shift+Enter, then the transcript)</div>
     <div class="line"></div>
   </div>
   <form class="inputrow" id="form">
     <span class="prompttext">@you:~ %</span>
-    <input id="input" autofocus autocomplete="off" spellcheck="false">
+    <textarea id="input" rows="1" autofocus autocomplete="off" spellcheck="false"></textarea>
   </form>
 </div>
 <script>
@@ -44,9 +45,17 @@ const BACKEND_URL = "https://v-o-i-c-e-ai.onrender.com/chat";
 const screen=document.getElementById("screen"),form=document.getElementById("form"),input=document.getElementById("input");
 function addLine(text,cls){const el=document.createElement("div");el.className="line "+(cls||"system");el.textContent=text;screen.appendChild(el);screen.scrollTop=screen.scrollHeight}
 function addBlock(text,cls){String(text||"").split("\n").forEach(x=>addLine(x,cls))}
+function resize(){input.style.height="auto";input.style.height=Math.min(input.scrollHeight,220)+"px"}
+input.addEventListener("input",resize);
+input.addEventListener("keydown",e=>{
+ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();form.requestSubmit()}
+});
 form.addEventListener("submit",async e=>{
  e.preventDefault(); const message=input.value.trim(); if(!message||input.disabled)return;
- addLine("@you:~ % "+message,"prompt"); input.value="";
+ const preview = message.length>400
+  ? message.slice(0,400)+"… ("+message.length+" characters)"
+  : message;
+ addLine("@you:~ % "+preview,"prompt"); input.value=""; resize();
  if(["quit","exit","shutdown"].includes(message.toLowerCase())){addLine("");addBlock('"Session closed."',"reply");return}
  input.disabled=true; addLine("> thinking...","research");
  try{
