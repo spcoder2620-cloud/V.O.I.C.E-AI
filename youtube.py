@@ -16,9 +16,29 @@ say so plainly rather than invent a transcript.
 import html
 import json
 import re
+import urllib.error
 import urllib.parse
+import urllib.request
 
-from web import Web
+
+# YouTube routinely blocks plain scripted requests from datacenter IPs
+# (like Render's) with a 403, or detours EU-geolocated requests through
+# a cookie-consent page before the real HTML loads. A fuller browser
+# header set plus a pre-accepted consent cookie avoids both cases in
+# the common case; nothing here works around a captcha challenge.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;"
+        "q=0.9,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cookie": "CONSENT=YES+1",
+}
 
 
 YOUTUBE_RE = re.compile(
@@ -30,8 +50,53 @@ YOUTUBE_RE = re.compile(
 
 
 class YouTube:
-    def __init__(self):
-        self.web = Web()
+    def _get(self, url, timeout=15):
+        """Like Web.request, but with real browser headers and with the
+        actual failure reason printed (it flows into the UI's research
+        panel) instead of being swallowed as a bare empty string."""
+        try:
+            request = urllib.request.Request(
+                url,
+                headers=BROWSER_HEADERS
+            )
+
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout
+            ) as response:
+                return response.read().decode(
+                    "utf-8",
+                    errors="ignore"
+                )
+
+        except urllib.error.HTTPError as exc:
+            print(
+                "> YouTube fetch failed: HTTP "
+                + str(exc.code)
+                + " ("
+                + ("likely blocked the request" if exc.code in (403, 429) else "unexpected status")
+                + ") for "
+                + url
+            )
+            return ""
+
+        except urllib.error.URLError as exc:
+            print(
+                "> YouTube fetch failed: "
+                + str(exc.reason)
+                + " for "
+                + url
+            )
+            return ""
+
+        except (TimeoutError, OSError) as exc:
+            print(
+                "> YouTube fetch failed: "
+                + str(exc)
+                + " for "
+                + url
+            )
+            return ""
 
     @staticmethod
     def find_link(text):
@@ -63,7 +128,7 @@ class YouTube:
             return None, None
 
         watch_url = "https://www.youtube.com/watch?v=" + video_id
-        page = self.web.request(watch_url, timeout=15)
+        page = self._get(watch_url)
 
         if not page:
             return None, None
@@ -144,7 +209,7 @@ class YouTube:
         return html.unescape(base_url) if base_url else None
 
     def _transcript(self, captions_url):
-        xml = self.web.request(captions_url, timeout=15)
+        xml = self._get(captions_url)
 
         if not xml:
             return ""
